@@ -2,22 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:faker/faker.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
-  await Hive.openBox<int>('numbers');
+  if (!Hive.isBoxOpen('names')) {
+    await Hive.openBox<String>('names');
+  }
   await setupHiveAndStoreData(10, 20);
   runApp(const MyApp());
 }
 
 Future<void> setupHiveAndStoreData(int numPages, int itemsPerPage) async {
-  var box = Hive.box<int>('numbers');
+  var box = Hive.box<String>('names');
   if (box.isEmpty) {
     for (int page = 0; page < numPages; page++) {
       for (int i = 0; i < itemsPerPage; i++) {
-        int itemValue = (page * itemsPerPage) + i + 1;
-        await box.add(itemValue);
+        String uniqueName = faker.person.name();
+        await box.add(uniqueName);
       }
     }
   }
@@ -46,19 +49,23 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final BehaviorSubject<List<int>> _dataSubject = BehaviorSubject<List<int>>.seeded([]);
+  final BehaviorSubject<List<String>> _dataSubject = BehaviorSubject<List<String>>.seeded([]);
   final ScrollController _scrollController = ScrollController();
   final int _perPage = 20;
   int _currentPage = 0;
-  late Box<int> _box;
+  late Box<String> _box;
   bool _isLoading = false;
+  TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_scrollListener);
-    _box = Hive.box<int>('numbers');
+    _box = Hive.box<String>('names');
     loadData();
+    _searchController.addListener(() {
+      filterSearchResults(_searchController.text);
+    });
   }
 
   @override
@@ -66,6 +73,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _dataSubject.close();
     _scrollController.dispose();
     Hive.close();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -74,9 +82,8 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         _isLoading = true;
       });
-
       Future.delayed(const Duration(seconds: 1), () {
-        List<int> newData = [];
+        List<String> newData = [];
         for (int i = _currentPage * _perPage; i < (_currentPage + 1) * _perPage && i < _box.length; i++) {
           newData.add(_box.getAt(i)!);
         }
@@ -98,13 +105,41 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  void filterSearchResults(String query) {
+    if(query.isEmpty) {
+      _dataSubject.add(_box.values.toList());
+    } else {
+      List<String> filteredList = _box.values.where((item) => item.toLowerCase().contains(query.toLowerCase())).toList();
+      _dataSubject.add(filteredList);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Infinite Scroll (Local Storage)'),
+        title: Row(
+          children: <Widget>[
+            Expanded(
+              flex: 1,
+              child: Text('Infinite Scroll (Local Storage)'),
+            ),
+            Expanded(
+              flex: 1,
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: "Search...",
+                  border: InputBorder.none,
+                  fillColor: Colors.white,
+                  filled: true,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
-      body: StreamBuilder<List<int>>(
+      body: StreamBuilder<List<String>>(
         stream: _dataSubject.stream,
         builder: (context, snapshot) {
           if (snapshot.hasData && snapshot.data!.isNotEmpty) {
@@ -115,7 +150,7 @@ class _MyHomePageState extends State<MyHomePage> {
               itemBuilder: (context, index) {
                 if (index < data.length) {
                   return ListTile(
-                    title: Text('Item ${data[index]}'),
+                    title: Text(data[index]),
                   );
                 } else {
                   return const Padding(
